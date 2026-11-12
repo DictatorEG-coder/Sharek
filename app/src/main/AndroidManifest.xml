@@ -1,15 +1,33 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- نقل مباشر عبر الشبكة المحلية فقط؛ لا حاجة إلى صلاحيات تخزين (نستخدم Storage Access Framework و MediaStore). -->
+    <!-- نقل مباشر عبر الشبكة المحلية فقط؛ لا حسابات ولا خوادم. -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
 
+    <!-- تُطلب عند الحاجة فقط: عرض الصور والفيديوهات داخل التطبيق -->
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
+    <uses-permission android:name="android.permission.READ_MEDIA_VISUAL_USER_SELECTED" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
+    <!-- تُطلب عند فتح قسم جهات الاتصال فقط -->
+    <uses-permission android:name="android.permission.READ_CONTACTS" />
+
+    <!-- رؤية التطبيقات القابلة للتشغيل دون صلاحية QUERY_ALL_PACKAGES الواسعة -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+    </queries>
+
     <application
         android:allowBackup="false"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
         android:label="شارك"
         android:supportsRtl="true"
-        android:theme="@android:style/Theme.Material.Light.NoActionBar">
+        android:theme="@android:style/Theme.Material.NoActionBar">
         <activity
             android:name=".MainActivity"
             android:exported="true">

@@ -1,7 +1,6 @@
 package com.sharek.app
 
 import android.content.Context
-import android.os.Build
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -50,7 +49,19 @@ object Controller {
     @Volatile private var decision: CompletableDeferred<Boolean>? = null
     @Volatile private var advertiser: Advertiser? = null
 
+    // جلسة النقل الجارية، لتسجيلها في السجل (لا تؤثر على البروتوكول).
+    private class Session(val sending: Boolean, val peer: String, val files: List<SavedFile>)
+    @Volatile private var session: Session? = null
+
+    private fun finishSession(status: String, files: List<SavedFile>? = null) {
+        val s = session ?: return
+        session = null
+        val now = System.currentTimeMillis()
+        History.add(HistoryEntry(now, s.sending, s.peer, now, status, files ?: s.files))
+    }
+
     fun reset() {
+        finishSession(History.CANCELLED)
         stopAll()
         _state.value = UiState.Idle
     }
@@ -74,7 +85,7 @@ object Controller {
     fun startReceiving(ctx: Context) {
         val app = ctx.applicationContext
         stopAll()
-        val name = Build.MODEL ?: "Android"
+        val name = Prefs.deviceName(app)
         job = scope.launch {
             val srv = ServerSocket()
             try {
@@ -104,7 +115,10 @@ object Controller {
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                if (isActive) _state.value = UiState.Failed(describe(e))
+                if (isActive) {
+                    finishSession(History.FAILED)
+                    _state.value = UiState.Failed(describe(e))
+                }
             } finally {
                 runCatching { srv.close() }
                 if (server === srv) server = null
@@ -140,12 +154,14 @@ object Controller {
         val output = DataOutputStream(BufferedOutputStream(sock.getOutputStream()))
         val header = readHeader(input) ?: return false
 
+        session = Session(false, header.sender, header.files.map { SavedFile(it.name, it.size, null, Proto.mimeFor(it.name)) })
         val d = CompletableDeferred<Boolean>()
         decision = d
         _state.value = UiState.Incoming(header.sender, header.files)
         val accepted = withTimeoutOrNull(120_000) { d.await() } ?: false
         decision = null
         if (!accepted) {
+            finishSession(History.REJECTED)
             runCatching { output.writeBoolean(false); output.flush() }
             return false
         }
@@ -193,15 +209,17 @@ object Controller {
                 if (!committed) FileStore.discard(ctx, pending)
             }
         }
+        finishSession(History.OK, saved)
         _state.value = UiState.Done(false, saved)
         return true
     }
 
     // ───────────────────────── الإرسال ─────────────────────────
 
-    fun send(ctx: Context, host: String, port: Int, files: List<OutFile>) {
+    fun send(ctx: Context, host: String, port: Int, files: List<OutFile>, peerName: String = host) {
         val app = ctx.applicationContext
         stopAll()
+        session = Session(true, peerName, files.map { SavedFile(it.name, it.size, it.uri, Proto.mimeFor(it.name)) })
         job = scope.launch {
             _state.value = UiState.Connecting("جارٍ الاتصال بـ $host …")
             val sock = Socket()
@@ -214,7 +232,7 @@ object Controller {
                 val input = DataInputStream(BufferedInputStream(sock.getInputStream()))
 
                 output.writeUTF(Proto.MAGIC)
-                output.writeUTF(Build.MODEL ?: "Android")
+                output.writeUTF(Prefs.deviceName(app))
                 output.writeInt(files.size)
                 for (f in files) {
                     output.writeUTF(f.name)
@@ -224,7 +242,10 @@ object Controller {
 
                 _state.value = UiState.Connecting("بانتظار موافقة الهاتف الآخر على الاستلام …")
                 if (!input.readBoolean()) {
-                    if (isActive) _state.value = UiState.Failed("رفض الهاتف الآخر استلام الملفات.")
+                    if (isActive) {
+                        finishSession(History.REJECTED)
+                        _state.value = UiState.Failed("رفض الهاتف الآخر استلام الملفات.")
+                    }
                     return@launch
                 }
                 sock.soTimeout = 30_000
@@ -258,11 +279,15 @@ object Controller {
                     }
                     emit(true, f.name, i, files.size, f.size, f.size, meter, true)
                 }
+                finishSession(History.OK)
                 _state.value = UiState.Done(true, files.map { SavedFile(it.name, it.size, null, null) })
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                if (isActive) _state.value = UiState.Failed(describe(e))
+                if (isActive) {
+                    finishSession(History.FAILED)
+                    _state.value = UiState.Failed(describe(e))
+                }
             } finally {
                 runCatching { sock.close() }
                 if (active === sock) active = null

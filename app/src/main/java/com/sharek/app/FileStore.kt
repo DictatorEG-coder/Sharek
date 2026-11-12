@@ -75,6 +75,10 @@ object FileStore {
 
     /** قراءة اسم وحجم ملف اختاره المستخدم من منتقي الملفات. */
     fun describe(ctx: Context, uri: Uri): OutFile? {
+        if (uri.scheme == "file") { // ملفات APK للتطبيقات
+            val f = java.io.File(uri.path ?: return null)
+            return if (f.isFile) OutFile(uri, Proto.cleanName(f.name), f.length()) else null
+        }
         var name = "file"
         var size = -1L
         ctx.contentResolver.query(
@@ -93,6 +97,11 @@ object FileStore {
         if (size < 0) return null
         return OutFile(uri, Proto.cleanName(name), size)
     }
+
+    /** هل ما زال الملف موجودًا ويمكن قراءته؟ */
+    fun readable(ctx: Context, uri: Uri): Boolean = runCatching {
+        ctx.contentResolver.openInputStream(uri)?.use { true } ?: false
+    }.getOrDefault(false)
 
     fun open(ctx: Context, f: SavedFile) {
         val uri = f.uri ?: return

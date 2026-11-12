@@ -2,23 +2,31 @@ package com.sharek.app
 
 import android.graphics.Bitmap
 import android.graphics.Color as AColor
+import android.net.Uri
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.qrcode.QRCodeWriter
+
+data class QrTarget(val host: String, val port: Int, val name: String)
 
 object Qr {
     private const val PREFIX = "sharek://"
 
-    fun payload(host: String, port: Int) = "$PREFIX$host:$port"
+    /** الرمز يحمل العنوان والمنفذ واسم الجهاز؛ الرموز القديمة (بلا اسم) ما زالت مقبولة. */
+    fun payload(host: String, port: Int, name: String) =
+        "$PREFIX$host:$port?n=${Uri.encode(name)}"
 
-    /** يحلّل محتوى الرمز؛ يعيد null إن لم يكن رمز شارك صالحًا. */
-    fun parse(raw: String?): Pair<String, Int>? {
+    fun parse(raw: String?): QrTarget? {
         val t = raw?.trim() ?: return null
         if (!t.startsWith(PREFIX)) return null
         val body = t.removePrefix(PREFIX)
-        val host = body.substringBefore(':')
-        val port = body.substringAfter(':', "").toIntOrNull() ?: Proto.PORT
+        val hp = body.substringBefore('?')
+        val query = body.substringAfter('?', "")
+        val host = hp.substringBefore(':')
+        val port = hp.substringAfter(':', "").toIntOrNull() ?: Proto.PORT
         if (host.isEmpty() || port !in 1..65535) return null
-        return host to port
+        val name = query.split('&').firstOrNull { it.startsWith("n=") }
+            ?.removePrefix("n=")?.let { Uri.decode(it) }?.takeIf { it.isNotBlank() } ?: host
+        return QrTarget(host, port, name)
     }
 
     fun bitmap(text: String, size: Int = 512): Bitmap {
